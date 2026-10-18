@@ -1,0 +1,30 @@
+{
+  "name": "@agentphone/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "agentphone": "tsx src/setup-cli.ts",
+    "test": "tsx --test src/setup-plan.test.ts src/integration.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@agentphone/adapter-hermes": "workspace:*",
+    "@agentphone/db": "workspace:*",
+    "@agentphone/protocol": "workspace:*",
+    "@fastify/cors": "^11.0.1",
+    "@fastify/formbody": "^8.0.2",
+    "@fastify/websocket": "^11.2.0",
+    "drizzle-orm": "^0.44.2",
+    "fastify": "^5.3.3",
+    "twilio": "^5.7.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}

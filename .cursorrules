@@ -1,0 +1,61 @@
+# Instructions
+Reply in Chinese
+
+# Lessons
+
+## User Specified Lessons
+
+- You have a python venv in ./venv.
+- Include info useful for debugging in the program output.
+- Read the file before you try to edit it.
+- Use LLM to perform flexible text understanding tasks. First test on a few files. After success, make it parallel.
+
+## Cursor learned
+
+- For website image paths, always use the correct relative path (e.g., 'images/filename.png') and ensure the images directory exists
+- For search results, ensure proper handling of different character encodings (UTF-8) for international queries
+- Add debug information to stderr while keeping the main output clean in stdout for better pipeline integration
+- When using seaborn styles in matplotlib, use 'seaborn-v0_8' instead of 'seaborn' as the style name due to recent seaborn version changes
+- AgentPhone: Twilio ConversationRelay owns PSTN/STT/TTS. Do not build SIP. Relay messages are setup, prompt, dtmf, interrupt, error inbound; text and end outbound.
+- AgentPhone: Hermes stays the reasoner. Drive it through TUI gateway `/api/ws` (`prompt.submit`, `message.delta`, `tool.start`). One phone thread maps to one Hermes session.
+- AgentPhone: hard policy gates apply to `action.propose` only. Do not pretend to sandbox the agent's own calendar, email, or browser tools.
+- This machine's pnpm skips native builds. Use Node's built-in `node:sqlite` behind Drizzle's better-sqlite3 session, and implement `statement.raw()` as column-ordered arrays. Do not depend on a compiled better-sqlite3 binary.
+- Vite on this Windows host answers on `http://localhost:5173`, not `http://127.0.0.1:5173`. The API still binds `127.0.0.1:8787`.
+
+# Scratchpad
+
+## Current task
+
+AgentPhone MVP — phone channel for existing agents (Hermes, Generic, later OpenClaw).
+
+Phases 1–9 are implemented. OpenClaw adapter is not started.
+
+## Decisions in code
+
+- TypeScript, pnpm, Fastify, Drizzle, Node built-in sqlite, Vite + React console
+- Gateway WebSocket for live speech. MCP at POST /mcp for call, hangup, thread, callback, phone_action
+- Twilio ConversationRelay when TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN are set. Otherwise local numbers and simulated calls
+- Thread key: (agent_id, contact E.164)
+- Offline inbound: missed call + callback requested
+- Policy hard gate is action.propose / phone_action
+
+## Plan
+
+[X] Phase 1 skeleton and data model
+[X] Phase 2 numbers and TwiML
+[X] Phase 3 ConversationRelay bridge
+[X] Phase 4 Generic Gateway SDK and echo agent
+[X] Phase 5 Threads
+[X] Phase 6 Hermes adapter
+[X] Phase 7 Policies and approvals
+[X] Phase 8 Outbound and callback
+[X] Phase 9 Console: Agents, Phone Number, Calls, Threads, Permissions
+[ ] Phase 10 OpenClaw adapter
+
+## How people install
+
+This is a local open-source app. The user sends the repo to their own agent. The agent follows AGENTS.md and `pnpm --filter @agentphone/api setup`. stdout is one JSON object. The user only says ok, supplies Twilio credentials, or does something the agent cannot do. One US number does calls and SMS. SMS is stored on the same contact thread.
+
+## Connect link
+
+Optional when the server is already running. Credentials are never embedded in the human page.
