@@ -102,6 +102,10 @@ export class AgentPhoneClient {
     this.send({ type: "call.hangup", callId, payload: { reason } });
   }
 
+  sms(to: string, body: string): void {
+    this.send({ type: "sms.send", payload: { to, body } });
+  }
+
   scheduleCallback(threadId: string, at: string, note = ""): void {
     this.send({ type: "callback.schedule", threadId, payload: { at, note } });
   }

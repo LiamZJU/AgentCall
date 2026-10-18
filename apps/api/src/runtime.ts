@@ -1,4 +1,4 @@
-import { evaluateAction, normalizeE164, serverEvent, type Policy, type ServerEvent } from "@agentphone/protocol";
+import { normalizeE164, serverEvent, type Policy, type ServerEvent } from "@agentphone/protocol";
 import type { AppConfig } from "./config.js";
 import { HttpError } from "./errors.js";
 import { log } from "./log.js";
@@ -361,41 +361,10 @@ export function createRuntime(store: Store, config: AppConfig) {
       push(agentId, serverEvent("action.resolved", { requestId, ...result }, { callId: live.callId, threadId: live.threadId }));
       return Promise.resolve(result);
     }
-    const judged = evaluateAction(live.policy, action, args);
-    if (judged.decision === "deny") {
-      const result = { decision: "deny", reason: judged.reason };
-      push(agentId, serverEvent("action.resolved", { requestId, ...result }, { callId: live.callId, threadId: live.threadId }));
-      return Promise.resolve(result);
-    }
-    if (judged.decision === "allow") {
-      applyAction(live, action, args);
-      const result = { decision: "allow" };
-      push(agentId, serverEvent("action.resolved", { requestId, ...result }, { callId: live.callId, threadId: live.threadId }));
-      return Promise.resolve(result);
-    }
-    const approval = store.createApproval({
-      callId: live.callId,
-      threadId: live.threadId,
-      action,
-      payload: args,
-    });
-    live.awaitingApprovalId = approval.id;
-    speakSystem(live, "I need a moment to confirm that.");
-    push(
-      agentId,
-      serverEvent(
-        "action.pending",
-        { requestId, approvalId: approval.id, action, reason: judged.reason },
-        { callId: live.callId, threadId: live.threadId },
-      ),
-    );
-    log(`approval ${approval.id} pending`, { action, callId: live.callId });
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        finishApproval(approval.id, "expired", "No confirmation arrived in time");
-      }, config.approvalTimeoutMs);
-      live.waiters.push({ approvalId: approval.id, requestId, timer, resolve });
-    });
+    applyAction(live, action, args);
+    const result = { decision: "allow" };
+    push(agentId, serverEvent("action.resolved", { requestId, ...result }, { callId: live.callId, threadId: live.threadId }));
+    return Promise.resolve(result);
   }
 
   function onFinalUtterance(callId: string, text: string, lang: string): void {
@@ -451,21 +420,12 @@ export function createRuntime(store: Store, config: AppConfig) {
     return { message, thread };
   }
 
-  async function sendSms(agentId: string, toRaw: string, body: string, userApproved: boolean) {
+  async function sendSms(agentId: string, toRaw: string, body: string) {
     const to = normalizeE164(toRaw);
     const text = body.trim();
     if (!text) throw new HttpError(400, "message body is required");
     const number = store.numberForAgent(agentId);
     if (!number) throw new HttpError(409, "agent has no phone number");
-    const policy = store.resolvePolicy(agentId);
-    const judged = evaluateAction(policy, "send_sms", { body: text, to });
-    if (judged.decision === "deny") throw new HttpError(403, judged.reason);
-    if (judged.decision === "approval" && !userApproved) {
-      return {
-        needsUser: true,
-        ask: `要给 ${to} 发这条短信，需要你确认：${text}`,
-      };
-    }
     const contact = store.upsertContact(agentId, to);
     const thread = store.upsertThread(agentId, contact.id);
     let sid: string | null = null;
@@ -858,6 +818,12 @@ export function createRuntime(store: Store, config: AppConfig) {
   };
 
   async function handleAgent(agentId: string, frame: ClientFrame): Promise<void> {
+    if (frame.type === "sms.send") {
+      const to = typeof frame.payload.to === "string" ? frame.payload.to : "";
+      const body = typeof frame.payload.body === "string" ? frame.payload.body : "";
+      await sendSms(agentId, to, body);
+      return;
+    }
     if (frame.type === "say.delta") {
       const live = liveByAgent.get(agentId);
       if (!live || live.ended || frame.callId !== live.callId) throw new HttpError(409, "no active call");

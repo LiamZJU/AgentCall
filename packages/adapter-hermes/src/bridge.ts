@@ -135,18 +135,19 @@ export async function startHermesBridge(options: HermesBridgeOptions): Promise<{
         sessions.set(threadId, sessionId);
         phone.patchThread(threadId, { externalSessionId: sessionId });
       }
-      await hermes.turn(
+      const reply = await hermes.turn(
         sessionId,
         [
-          "You received an SMS. This is not a phone call. Do not speak aloud.",
+          "You received an SMS. This is not a phone call.",
           `From: ${from}`,
-          `Thread: ${threadId}`,
           `Message: ${text}`,
-          "If a reply is useful, call the agentphone sms_send tool.",
-          "If that tool says the user must confirm, ask the user. Call sms_send again with userApproved true only after they agree.",
+          "If you want to reply, the next thing you write must be only the SMS text.",
+          "If you do not want to reply, write NO_REPLY.",
         ].join("\n"),
         { onDelta: () => undefined, onTool: () => undefined, onComplete: () => undefined },
       );
+      const outgoing = reply.trim();
+      if (outgoing && outgoing !== "NO_REPLY") phone.sms(from, outgoing);
     });
   });
 

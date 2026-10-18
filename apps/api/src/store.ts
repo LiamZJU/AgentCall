@@ -994,23 +994,67 @@ export function createStore(databasePath: string) {
     },
 
     listHermesBridges() {
-      return db
-        .select()
-        .from(schema.agents)
-        .all()
-        .flatMap((row) => {
-          if (row.adapter !== "hermes") return [];
-          const config = parseObject(row.adapterConfig);
-          if (typeof config.hermesWsUrl !== "string" || typeof config.gatewayToken !== "string") return [];
-          return [
-            {
-              agentId: row.id,
-              hermesWsUrl: config.hermesWsUrl,
-              hermesToken: typeof config.hermesToken === "string" ? config.hermesToken : "",
-              gatewayToken: config.gatewayToken,
-            },
-          ];
-        });
+      return this.listVoiceBridges().filter((item) => item.kind === "hermes");
+    },
+
+    listVoiceBridges(): Array<
+      | {
+          kind: "hermes";
+          agentId: string;
+          hermesWsUrl: string;
+          hermesToken: string;
+          gatewayToken: string;
+        }
+      | {
+          kind: "openclaw";
+          agentId: string;
+          hermesWsUrl: string;
+          hermesToken: string;
+          gatewayToken: string;
+        }
+    > {
+      const bridges: Array<
+        | {
+            kind: "hermes";
+            agentId: string;
+            hermesWsUrl: string;
+            hermesToken: string;
+            gatewayToken: string;
+          }
+        | {
+            kind: "openclaw";
+            agentId: string;
+            hermesWsUrl: string;
+            hermesToken: string;
+            gatewayToken: string;
+          }
+      > = [];
+      for (const row of db.select().from(schema.agents).all()) {
+        const config = parseObject(row.adapterConfig);
+        if (typeof config.gatewayToken !== "string") continue;
+        if (
+          row.adapter === "hermes" &&
+          typeof config.hermesWsUrl === "string" &&
+          config.hermesWsUrl.startsWith("ws")
+        ) {
+          bridges.push({
+            kind: "hermes",
+            agentId: row.id,
+            hermesWsUrl: config.hermesWsUrl,
+            hermesToken: typeof config.hermesToken === "string" ? config.hermesToken : "",
+            gatewayToken: config.gatewayToken,
+          });
+        } else if (row.adapter === "openclaw") {
+          bridges.push({
+            kind: "openclaw",
+            agentId: row.id,
+            hermesWsUrl: "",
+            hermesToken: "",
+            gatewayToken: config.gatewayToken,
+          });
+        }
+      }
+      return bridges;
     },
   };
 }

@@ -19,6 +19,9 @@ importers:
       '@agentphone/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@agentphone/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
       '@fastify/cors':
         specifier: ^11.0.1
         version: 11.3.1

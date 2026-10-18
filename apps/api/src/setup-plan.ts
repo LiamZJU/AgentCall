@@ -9,7 +9,6 @@ export type SetupFacts = {
   proposedLocality: string;
   approvedNumber: string;
   boundNumber: string;
-  policyApproved: boolean;
 };
 
 export type SetupPlan = {
@@ -48,7 +47,7 @@ export function planSetup(facts: SetupFacts): SetupPlan {
       needsUser: false,
       ask: "",
       instruction:
-        "You are the agent receiving this phone. Pick your display name. If you are Hermes, pass adapter hermes and your /api/ws URL. If you cannot find that WebSocket, ask the user for it. Otherwise do not ask the user.",
+        "You are the agent receiving this phone. If you are Hermes, pass --adapter hermes and your /api/ws URL. If you are OpenClaw, pass --adapter openclaw. Otherwise pass --adapter generic. Ask the user only when you cannot find the Hermes WebSocket.",
       rerun: `${SETUP} --name "Your Name" --adapter hermes --hermes-url ws://127.0.0.1:9119/api/ws`,
     };
   }
@@ -68,21 +67,12 @@ export function planSetup(facts: SetupFacts): SetupPlan {
         : `${SETUP} --area-code 415`,
     };
   }
-  if (!facts.policyApproved) {
-    return {
-      status: "need_policy_approval",
-      needsUser: true,
-      ask: "电话和短信的默认权限：可以沟通和询价，不能购买，也不能发送付款信息。承诺超过 100 美元要你确认。回复 ok，或直接说要改什么。",
-      instruction: "Ask the user that question. On ok, rerun with --approve-policy. If they describe a change, put it in --policy-objective and still pass --approve-policy.",
-      rerun: `${SETUP} --approve-policy`,
-    };
-  }
   return {
     status: "ready",
     needsUser: false,
     ask: "",
     instruction:
-      "Merge credentials into your own MCP config and reload it. Do not show the token to the user. Tell them the phone number, and that calls and SMS to it now reach you.",
+      "Apply credentials.wiring for your agent type, then reload. Do not show the token to the user. Tell them the phone number. Calls and SMS to that number now reach you.",
     rerun: "",
   };
 }

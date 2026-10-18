@@ -13,7 +13,6 @@ const base: SetupFacts = {
   proposedLocality: "",
   approvedNumber: "",
   boundNumber: "",
-  policyApproved: false,
 };
 
 test("setup asks the user for Twilio credentials first", () => {
@@ -46,17 +45,16 @@ test("setup asks the user to approve one exact phone number", () => {
   assert.match(plan.rerun, /--approve-number \+14155550100/);
 });
 
-test("setup is ready only after the number is bound and the policy is approved", () => {
+test("setup is ready after the number is bound", () => {
   const facts: SetupFacts = {
     ...base,
     twilioSid: "ACxxx",
     twilioToken: "secret",
     publicUrl: "https://phone.example.com",
     name: "Desk",
-    adapter: "hermes",
-    hermesWsUrl: "ws://127.0.0.1:9119/api/ws",
+    adapter: "openclaw",
     boundNumber: "+14155550100",
   };
-  assert.equal(planSetup(facts).status, "need_policy_approval");
-  assert.equal(planSetup({ ...facts, policyApproved: true }).status, "ready");
+  assert.equal(planSetup(facts).status, "ready");
+  assert.equal(planSetup({ ...facts, adapter: "hermes", hermesWsUrl: "" }).status, "need_identity");
 });

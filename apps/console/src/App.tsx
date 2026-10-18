@@ -4,7 +4,6 @@ import { api, getKey, setKey, type Health } from "./api";
 import { AgentsPage } from "./pages/Agents";
 import { CallsPage } from "./pages/Calls";
 import { NumbersPage } from "./pages/Numbers";
-import { PermissionsPage } from "./pages/Permissions";
 import { ThreadsPage } from "./pages/Threads";
 
 export function App() {
@@ -35,9 +34,8 @@ export function App() {
         <div className="stack">
           <NavLink to="/" end>Agent</NavLink>
           <NavLink to="/numbers">电话号码</NavLink>
-          <NavLink to="/calls">通话</NavLink>
+          <NavLink to="/calls">通话和短信</NavLink>
           <NavLink to="/threads">Thread</NavLink>
-          <NavLink to="/permissions">权限</NavLink>
         </div>
         <p className="lede">
           {health ? (health.twilio ? "Twilio 已配置" : "Twilio 未配置，可绑定本地号码") : "正在连接 API"}
@@ -50,7 +48,6 @@ export function App() {
           <Route path="/numbers" element={<NumbersPage health={health} />} />
           <Route path="/calls" element={<CallsPage health={health} />} />
           <Route path="/threads" element={<ThreadsPage />} />
-          <Route path="/permissions" element={<PermissionsPage />} />
         </Routes>
       </main>
     </div>

@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
 import { buildApp } from "./app.js";
-import { closeHermesBridges, resumeHermesBridges } from "./bridges.js";
+import { closeHermesBridges, resumeVoiceBridges } from "./bridges.js";
 import { loadConfig, loadEnvFiles, type AppConfig } from "./config.js";
 import { log } from "./log.js";
 import { createRuntime } from "./runtime.js";
@@ -22,7 +22,7 @@ export async function start(overrides: Partial<AppConfig> = {}) {
     void runtime.tickCallbacks();
   }, 15_000);
   timer.unref?.();
-  void resumeHermesBridges(store, config);
+  void resumeVoiceBridges(store, config);
   log(`listening ${url}`, {
     twilio: twilioConfigured(config),
     devSimulate: config.devSimulate,

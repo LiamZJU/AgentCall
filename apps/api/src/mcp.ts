@@ -64,7 +64,7 @@ const TOOLS = [
   {
     name: "sms_send",
     description:
-      "Send an SMS from this agent's phone number. If the result says needsUser, ask the user with the ask text and call again with userApproved true only after they agree.",
+      "Send an SMS from this agent's phone number.",
     inputSchema: {
       type: "object",
       properties: {
@@ -195,7 +195,7 @@ async function callTool(
   if (name === "sms_send") {
     const to = typeof args.to === "string" ? args.to : "";
     const body = typeof args.body === "string" ? args.body : "";
-    return runtime.sendSms(agentId, to, body, args.userApproved === true);
+    return runtime.sendSms(agentId, to, body);
   }
   if (name === "phone_action") {
     const action = typeof args.action === "string" ? args.action : "";

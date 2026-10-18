@@ -82,10 +82,6 @@ async function run(current: SetupState) {
     facts = currentFacts(current, current.approvedNumber);
     plan = planSetup(facts);
   }
-  if (plan.status === "need_policy_approval" && current.policyApproved) {
-    await ensurePolicy(current);
-    plan = planSetup({ ...facts, policyApproved: true, boundNumber: facts.boundNumber || current.approvedNumber });
-  }
   if (plan.status === "ready") {
     const ready = await finish(current);
     return emit({ ...plan, ...ready });
@@ -110,7 +106,6 @@ function currentFacts(current: SetupState, bound: string): SetupFacts {
     proposedLocality: current.proposedLocality,
     approvedNumber: current.approvedNumber,
     boundNumber: bound,
-    policyApproved: current.policyApproved,
   };
 }
 
@@ -148,35 +143,21 @@ async function buyApprovedNumber(current: SetupState) {
   });
 }
 
-async function ensurePolicy(current: SetupState) {
-  await ensureServer();
-  const agent = await ensureAgent(current);
-  const existing = await api<{ policies: Array<{ agentId: string; isDefault: boolean }> }>(
-    `/v1/policies?agentId=${agent.id}`,
-  );
-  if (existing.policies.some((policy) => policy.isDefault)) return;
-  await api("/v1/policies", {
-    method: "POST",
-    body: JSON.stringify({
-      agentId: agent.id,
-      name: "默认电话和短信权限",
-      objective: current.policyObjective || "可以沟通和询价。不能购买，也不能发送付款信息。",
-      allowedActions: ["ask_price", "commit_price", "schedule_callback", "send_sms"],
-      forbiddenActions: ["purchase", "share_payment_details", "agree_contract"],
-      approvalRules: [{ action: "commit_price", when: { amountUsdGt: 100 } }],
-      isDefault: true,
-    }),
-  });
-}
-
 async function finish(current: SetupState) {
   await ensureServer();
   const agent = await ensureAgent(current);
   const numbers = await api<{ numbers: Array<{ agentId: string; e164: string }> }>("/v1/numbers");
   const mine = numbers.numbers.find((number) => number.agentId === agent.id);
-  if (current.adapter === "hermes") await restartServer();
+  if (current.adapter === "hermes" || current.adapter === "openclaw") await restartServer();
   const token = current.agentToken;
   const base = process.env.PUBLIC_BASE_URL ?? "http://127.0.0.1:8787";
+  const yaml = [
+    "mcp_servers:",
+    "  agentcall:",
+    `    url: ${base}/mcp`,
+    "    headers:",
+    `      Authorization: "Bearer ${token}"`,
+  ].join("\n");
   return {
     credentials: {
       agentId: agent.id,
@@ -184,13 +165,11 @@ async function finish(current: SetupState) {
       phoneNumber: mine?.e164 ?? current.approvedNumber,
       gatewayUrl: base,
       mcp: { url: `${base}/mcp`, headers: { Authorization: `Bearer ${token}` } },
-      hermesConfigYaml: [
-        "mcp_servers:",
-        "  agentphone:",
-        `    url: ${base}/mcp`,
-        "    headers:",
-        `      Authorization: "Bearer ${token}"`,
-      ].join("\n"),
+      wiring: {
+        hermes: yaml,
+        openclaw: `Add an MCP server named agentcall. Transport is streamable-http. URL is ${base}/mcp. Header Authorization is Bearer ${token}. Voice and SMS are connected with openclaw agent.`,
+        generic: `Connect a WebSocket to ${base.replace(/^http/, "ws")}/v1/gateway. First message is {"v":1,"id":"hello","type":"session.hello","payload":{"agentId":"${agent.id}","token":"${token}"}}. On utterance.final, reply with say.delta. On sms.received, reply with sms.send. Also add the same MCP server so you can place calls and send texts yourself.`,
+      },
     },
   };
 }

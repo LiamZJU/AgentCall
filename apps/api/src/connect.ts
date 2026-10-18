@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest, preHandlerHookHandler } from "fastify";
 import { isUsE164, normalizeE164, type ApprovalRule, type Policy } from "@agentphone/protocol";
 import { z } from "zod";
-import { ensureHermesBridge } from "./bridges.js";
+import { ensureHermesBridge, startAgentBridge } from "./bridges.js";
 import type { AppConfig } from "./config.js";
 import { HttpError } from "./errors.js";
 import { log } from "./log.js";
@@ -190,8 +190,11 @@ export function registerConnect(
       if (isRedirect(request)) return reply.redirect(`/connect/${session.code}`, 303);
       throw new HttpError(502, message);
     }
+    const bridge = await startAgentBridge(store, config, session.agentId);
     return finish(config, store, reply, request, session.code, {
-      status: "awaiting_policy_request",
+      status: "credentials_ready",
+      bridgeStatus: bridge.status,
+      bridgeError: "error" in bridge ? bridge.error ?? null : null,
       lastError: null,
     });
   });
@@ -294,13 +297,17 @@ function protocol(config: AppConfig, session: ConnectSessionView, who: "agent" |
         url: mcpUrl,
         headers: { Authorization: `Bearer ${token}` },
       },
-      hermesConfigYaml: [
-        "mcp_servers:",
-        "  agentphone:",
-        `    url: ${mcpUrl}`,
-        "    headers:",
-        `      Authorization: "Bearer ${token}"`,
-      ].join("\n"),
+      wiring: {
+        hermes: [
+          "mcp_servers:",
+          "  agentcall:",
+          `    url: ${mcpUrl}`,
+          "    headers:",
+          `      Authorization: "Bearer ${token}"`,
+        ].join("\n"),
+        openclaw: `Add an MCP server named agentcall. Transport is streamable-http. URL is ${mcpUrl}. Header Authorization is Bearer ${token}.`,
+        generic: `Connect a WebSocket to ${config.publicBaseUrl.replace(/^http/, "ws")}/v1/gateway and send session.hello with this agentId and token. On utterance.final send say.delta. On sms.received send sms.send.`,
+      },
     },
   };
 }
@@ -382,10 +389,10 @@ function nextAction(config: AppConfig, session: ConnectSessionView, secrets: boo
     }
     const bridgeNote =
       session.adapter === "hermes" && session.bridgeStatus === "online"
-        ? "语音通道已经连上你的 Hermes。你只需要把 credentials.hermesConfigYaml 写入自己的 MCP 配置并启用。"
-        : session.adapter === "hermes"
-          ? `语音桥未连上（${session.bridgeError ?? session.bridgeStatus ?? "unknown"}）。MCP 仍可写入。`
-          : "用 credentials.gatewayUrl、agentId、token 连接 WebSocket /v1/gateway，首帧发送 session.hello。";
+        ? "把 credentials.wiring.hermes 写入 Hermes MCP 配置。来电和短信会进入你的 Hermes 会话。"
+        : session.adapter === "openclaw"
+          ? "按 credentials.wiring.openclaw 添加 MCP。来电和短信会通过 openclaw agent 进入你的会话。"
+          : "按 credentials.wiring.generic 连接 WebSocket，并添加同一个 MCP。";
     return {
       method: "POST",
       url: `${config.publicBaseUrl}/v1/connect/${code}/complete`,

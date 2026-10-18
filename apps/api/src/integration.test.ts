@@ -100,59 +100,6 @@ test("offline inbound requests a callback", async () => {
   assert.equal(inbound.thread.callbackStatus, "requested");
 });
 
-test("policy denies purchase and holds a price above 100", async () => {
-  const created = await api("/v1/agents", {
-    method: "POST",
-    body: JSON.stringify({ name: "Buyer", adapter: "hermes" }),
-  });
-  const agentId = created.agent.id as string;
-  await api("/v1/policies", {
-    method: "POST",
-    body: JSON.stringify({
-      agentId,
-      name: "quote only",
-      objective: "Get a quote. Do not purchase.",
-      allowedActions: ["ask_price", "commit_price"],
-      forbiddenActions: ["purchase"],
-      approvalRules: [{ action: "commit_price", when: { amountUsdGt: 100 } }],
-      isDefault: true,
-    }),
-  });
-  await api("/v1/numbers/local", {
-    method: "POST",
-    body: JSON.stringify({ agentId, e164: "+14155550177" }),
-  });
-  const events = await connect(created.token, agentId);
-  const inbound = await api("/v1/dev/inbound", {
-    method: "POST",
-    body: JSON.stringify({ to: "+14155550177", from: "+14155550111" }),
-  });
-  await events.wait((event) => event.type === "call.started");
-
-  const denied = events.wait((event) => event.type === "action.resolved" && event.payload.decision === "deny");
-  events.send({
-    type: "action.propose",
-    callId: inbound.call.id,
-    payload: { action: "purchase", arguments: { amountUsd: 10 } },
-  });
-  assert.equal((await denied).payload.decision, "deny");
-
-  const pending = events.wait((event) => event.type === "action.pending");
-  events.send({
-    type: "action.propose",
-    callId: inbound.call.id,
-    payload: { action: "commit_price", arguments: { amountUsd: 150 } },
-  });
-  const approval = await pending;
-  const decision = await api(`/v1/approvals/${approval.payload.approvalId}/decision`, {
-    method: "POST",
-    body: JSON.stringify({ decision: "approved", note: "ok" }),
-  });
-  assert.equal(decision.result.decision, "approved");
-  await events.wait((event) => event.type === "action.resolved" && event.payload.decision === "approved");
-  events.close();
-});
-
 test("a scheduled callback places another call on the same thread", async () => {
   const created = await api("/v1/agents", {
     method: "POST",
@@ -211,21 +158,15 @@ test("an agent binds a phone through the connect link and the human only approve
   assert.equal(rejectedNumber.status, "awaiting_number_request");
 
   await publicJson(`/v1/connect/${code}/number`, { e164: "4155550166" });
-  await publicJson(`/v1/connect/${code}/authorize-number`, { decision: "approved" });
-  await publicJson(`/v1/connect/${code}/policy`, {
-    objective: "Get a quote. Do not purchase.",
-    allowedActions: ["ask_price"],
-    forbiddenActions: ["purchase"],
-    approvalRules: [{ action: "commit_price", when: { amountUsdGt: 100 } }],
-  });
-  await publicJson(`/v1/connect/${code}/authorize-policy`, { decision: "approved" });
+  const ready = await publicJson(`/v1/connect/${code}/authorize-number`, { decision: "approved" });
+  assert.equal(ready.status, "credentials_ready");
 
   const humanView = await publicJson(`/v1/connect/${code}?as=human`);
   assert.equal(humanView.credentials, undefined);
   const agentView = await publicJson(`/v1/connect/${code}?as=agent`);
   assert.equal(agentView.status, "credentials_ready");
   assert.equal(typeof agentView.credentials.token, "string");
-  assert.match(agentView.credentials.hermesConfigYaml, /Bearer /);
+  assert.match(agentView.credentials.wiring.hermes, /Bearer /);
 
   const events = await connect(agentView.credentials.token, agentView.credentials.agentId);
   events.close();
