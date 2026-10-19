@@ -1,15 +1,12 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 
-type Sms = { id: string; direction: string; fromE164: string; body: string; status: string };
+type Turn = { id: string; channel: string; who: string; text: string; createdAt: string };
 
 type Thread = {
   id: string;
   agentId: string;
   contactE164: string;
-  summary: string;
-  currentGoal: string;
-  pendingState: Record<string, unknown>;
   callbackStatus: string;
   callbackAt: string | null;
   callbackNote: string | null;
@@ -18,11 +15,8 @@ type Thread = {
 export function ThreadsPage() {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [selected, setSelected] = useState("");
-  const [summary, setSummary] = useState("");
-  const [goal, setGoal] = useState("");
-  const [pending, setPending] = useState("{}");
+  const [turns, setTurns] = useState<Turn[]>([]);
   const [callbackAt, setCallbackAt] = useState("");
-  const [messages, setMessages] = useState<Sms[]>([]);
   const [error, setError] = useState("");
 
   async function reload() {
@@ -41,35 +35,27 @@ export function ThreadsPage() {
 
   useEffect(() => {
     if (!selected) return;
-    api<{ messages: Sms[] }>(`/v1/threads/${selected}`)
-      .then((body) => setMessages(body.messages))
+    api<{ turns: Turn[] }>(`/v1/threads/${selected}`)
+      .then((body) => setTurns(body.turns))
       .catch(() => undefined);
   }, [selected, threads]);
-
-  useEffect(() => {
-    if (!thread) return;
-    setSummary(thread.summary);
-    setGoal(thread.currentGoal);
-    setPending(JSON.stringify(thread.pendingState, null, 2));
-  }, [thread?.id]);
 
   return (
     <div className="stack">
       <div>
-        <h2>Thread</h2>
-        <p className="lede">同一个联系人的多次通话共用一条 thread。再次来电会带上摘要、目标和 pending。</p>
+        <h2>联系人</h2>
+        <p className="lede">同一个人的电话和短信记在同一份记录里，按时间排列。</p>
       </div>
       {error ? <p className="error">{error}</p> : null}
       <div className="grid">
         <table>
           <thead>
-            <tr><th>联系人</th><th>目标</th><th>回拨</th></tr>
+            <tr><th>联系人</th><th>回拨</th></tr>
           </thead>
           <tbody>
             {threads.map((item) => (
               <tr key={item.id} className={item.id === selected ? "selected" : ""} onClick={() => setSelected(item.id)}>
                 <td>{item.contactE164}</td>
-                <td>{item.currentGoal || item.summary}</td>
                 <td><span className={`pill ${item.callbackStatus}`}>{item.callbackStatus}</span></td>
               </tr>
             ))}
@@ -80,19 +66,9 @@ export function ThreadsPage() {
             className="card stack"
             onSubmit={(event) => {
               event.preventDefault();
-              let pendingState: Record<string, unknown> = {};
-              try {
-                pendingState = JSON.parse(pending) as Record<string, unknown>;
-              } catch {
-                setError("pending 需要是 JSON 对象");
-                return;
-              }
               api(`/v1/threads/${thread.id}`, {
                 method: "PATCH",
                 body: JSON.stringify({
-                  summary,
-                  currentGoal: goal,
-                  pendingState,
                   callbackStatus: callbackAt ? "scheduled" : thread.callbackStatus,
                   callbackAt: callbackAt ? new Date(callbackAt).toISOString() : thread.callbackAt,
                 }),
@@ -102,23 +78,11 @@ export function ThreadsPage() {
             }}
           >
             <label>
-              摘要
-              <textarea value={summary} onChange={(event) => setSummary(event.target.value)} />
-            </label>
-            <label>
-              当前目标
-              <input value={goal} onChange={(event) => setGoal(event.target.value)} />
-            </label>
-            <label>
-              Pending
-              <textarea value={pending} onChange={(event) => setPending(event.target.value)} />
-            </label>
-            <label>
               预约回拨
               <input type="datetime-local" value={callbackAt} onChange={(event) => setCallbackAt(event.target.value)} />
             </label>
             <div className="row">
-              <button className="primary" type="submit">保存</button>
+              <button className="primary" type="submit">保存回拨</button>
               <button
                 type="button"
                 onClick={() => {
@@ -127,7 +91,6 @@ export function ThreadsPage() {
                     body: JSON.stringify({
                       agentId: thread.agentId,
                       to: thread.contactE164,
-                      objective: goal || thread.currentGoal,
                     }),
                   }).catch((reason: unknown) => setError(text(reason)));
                 }}
@@ -136,11 +99,10 @@ export function ThreadsPage() {
               </button>
             </div>
             <p className="lede">当前回拨：{thread.callbackStatus} {thread.callbackAt ?? ""} {thread.callbackNote ?? ""}</p>
-            <p className="lede">短信</p>
             <div className="transcript">
-              {messages.map((message) => (
-                <div key={message.id} className={`bubble ${message.direction === "outbound" ? "agent" : "contact"}`}>
-                  <strong>{message.direction === "outbound" ? "发出" : "收到"}</strong> {message.body}
+              {turns.map((turn) => (
+                <div key={turn.id} className={`bubble ${turn.who}`}>
+                  <strong>{turn.channel === "sms" ? "短信" : "电话"} · {turn.who === "agent" ? "我说" : turn.who === "contact" ? "对方" : "系统"}</strong> {turn.text}
                 </div>
               ))}
             </div>

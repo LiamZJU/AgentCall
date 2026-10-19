@@ -10,6 +10,7 @@ type SetupState = {
   adapter: string;
   hermesWsUrl: string;
   hermesToken: string;
+  command: string;
   areaCode: string;
   proposedNumber: string;
   proposedLocality: string;
@@ -122,7 +123,7 @@ async function searchNumber(areaCode: string) {
       status: "restart_server",
       needsUser: false,
       ask: "",
-      instruction: "The API is running without the Twilio credentials saved in .env. Stop the process on port 8787, then run pnpm setup again.",
+      instruction: "The API is running without the Twilio credentials saved in .env. Stop the process on port 8787, then rerun.",
       rerun: "pnpm --filter @agentphone/api agentphone",
     }, null, 2)}\n`);
     process.exit(0);
@@ -168,7 +169,7 @@ async function finish(current: SetupState) {
       wiring: {
         hermes: yaml,
         openclaw: `Add an MCP server named agentcall. Transport is streamable-http. URL is ${base}/mcp. Header Authorization is Bearer ${token}. Voice and SMS are connected with openclaw agent.`,
-        generic: `Connect a WebSocket to ${base.replace(/^http/, "ws")}/v1/gateway. First message is {"v":1,"id":"hello","type":"session.hello","payload":{"agentId":"${agent.id}","token":"${token}"}}. On utterance.final, reply with say.delta. On sms.received, reply with sms.send. Also add the same MCP server so you can place calls and send texts yourself.`,
+        generic: `Calls and texts are answered by the local command saved at install time. It receives the caller or sender text on stdin and in AGENTCALL_PROMPT, and its stdout is spoken or texted back. Reply NO_REPLY to skip a text. Also add an MCP server named agentcall. Transport is streamable-http. URL is ${base}/mcp. Header Authorization is Bearer ${token}. Use phone_call and sms_send to place calls and send texts yourself.`,
       },
     },
   };
@@ -176,6 +177,17 @@ async function finish(current: SetupState) {
 
 async function ensureAgent(current: SetupState) {
   if (current.agentId && current.agentToken) {
+    await api(`/v1/agents/${current.agentId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        adapterConfig: {
+          hermesWsUrl: current.hermesWsUrl,
+          hermesToken: current.hermesToken,
+          command: current.command,
+          gatewayToken: current.agentToken,
+        },
+      }),
+    });
     return { id: current.agentId, token: current.agentToken };
   }
   if (current.agentId && !current.agentToken) {
@@ -190,6 +202,7 @@ async function ensureAgent(current: SetupState) {
         adapterConfig: {
           hermesWsUrl: current.hermesWsUrl,
           hermesToken: current.hermesToken,
+          command: current.command,
           gatewayToken: rotated.token,
         },
       }),
@@ -201,7 +214,11 @@ async function ensureAgent(current: SetupState) {
     body: JSON.stringify({
       name: current.name,
       adapter: current.adapter,
-      adapterConfig: { hermesWsUrl: current.hermesWsUrl, hermesToken: current.hermesToken },
+      adapterConfig: {
+        hermesWsUrl: current.hermesWsUrl,
+        hermesToken: current.hermesToken,
+        command: current.command,
+      },
     }),
   });
   current.agentId = created.agent.id;
@@ -213,6 +230,7 @@ async function ensureAgent(current: SetupState) {
       adapterConfig: {
         hermesWsUrl: current.hermesWsUrl,
         hermesToken: current.hermesToken,
+        command: current.command,
         gatewayToken: created.token,
       },
     }),
@@ -285,6 +303,7 @@ function applyArgs(current: SetupState, flags: Map<string, string>) {
   if (flags.get("adapter")) current.adapter = flags.get("adapter") ?? "";
   if (flags.get("hermes-url")) current.hermesWsUrl = flags.get("hermes-url") ?? "";
   if (flags.get("hermes-token")) current.hermesToken = flags.get("hermes-token") ?? "";
+  if (flags.get("command")) current.command = flags.get("command") ?? "";
   if (flags.get("area-code")) {
     current.areaCode = flags.get("area-code") ?? "";
     current.proposedNumber = "";
@@ -303,6 +322,7 @@ function loadState(): SetupState {
       adapter: "",
       hermesWsUrl: "",
       hermesToken: "",
+      command: "",
       areaCode: "",
       proposedNumber: "",
       proposedLocality: "",
@@ -322,6 +342,7 @@ function emptyState(): SetupState {
     adapter: "",
     hermesWsUrl: "",
     hermesToken: "",
+    command: "",
     areaCode: "",
     proposedNumber: "",
     proposedLocality: "",

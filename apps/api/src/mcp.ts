@@ -28,24 +28,10 @@ const TOOLS = [
   },
   {
     name: "phone_thread_get",
-    description: "Read the phone thread for a contact number or thread id.",
+    description: "Read one contact's call and SMS history, in time order.",
     inputSchema: {
       type: "object",
       properties: { threadId: { type: "string" }, contact: { type: "string" } },
-    },
-  },
-  {
-    name: "phone_thread_update",
-    description: "Update the thread summary, goal, or pending state.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        threadId: { type: "string" },
-        summary: { type: "string" },
-        currentGoal: { type: "string" },
-        pendingState: { type: "object" },
-      },
-      required: ["threadId"],
     },
   },
   {
@@ -161,25 +147,19 @@ async function callTool(
     return { ok: true, callId: active.id };
   }
   if (name === "phone_thread_get") {
-    if (typeof args.threadId === "string") {
-      const thread = store.getThread(args.threadId);
-      if (thread.agentId !== agentId) throw new HttpError(404, "thread not found");
-      return thread;
-    }
-    const contact = store.upsertContact(agentId, normalizeE164(String(args.contact ?? "")));
-    return store.upsertThread(agentId, contact.id);
-  }
-  if (name === "phone_thread_update") {
-    const thread = store.getThread(String(args.threadId ?? ""));
+    const thread =
+      typeof args.threadId === "string"
+        ? store.getThread(args.threadId)
+        : store.upsertThread(agentId, store.upsertContact(agentId, normalizeE164(String(args.contact ?? ""))).id);
     if (thread.agentId !== agentId) throw new HttpError(404, "thread not found");
-    return store.updateThread(thread.id, {
-      summary: typeof args.summary === "string" ? args.summary : undefined,
-      currentGoal: typeof args.currentGoal === "string" ? args.currentGoal : undefined,
-      pendingState:
-        args.pendingState && typeof args.pendingState === "object"
-          ? (args.pendingState as Record<string, unknown>)
-          : undefined,
-    });
+    return {
+      threadId: thread.id,
+      contactE164: thread.contactE164,
+      callbackStatus: thread.callbackStatus,
+      callbackAt: thread.callbackAt,
+      callbackNote: thread.callbackNote,
+      turns: store.listTurns(thread.id, 50),
+    };
   }
   if (name === "phone_callback_schedule") {
     const thread = store.getThread(String(args.threadId ?? ""));

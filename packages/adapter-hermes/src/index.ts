@@ -1,6 +1,8 @@
 import { pathToFileURL } from "node:url";
 import { startHermesBridge } from "./bridge.js";
 
+export { HermesClient, type HermesHandlers } from "./hermes.js";
+
 const entry = process.argv[1];
 if (entry && import.meta.url === pathToFileURL(entry).href) {
   const args = parseArgs(process.argv.slice(2));

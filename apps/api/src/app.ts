@@ -221,7 +221,7 @@ export async function buildApp(services: Services) {
     return {
       thread,
       calls: store.listCalls({ threadId: id }),
-      segments: store.recentSegments(id, 50),
+      turns: store.listTurns(id, 80),
       messages: store.listMessages(id),
     };
   });

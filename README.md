@@ -12,9 +12,9 @@ A dedicated phone number for every Agent. Connect voice and SMS to talk to peopl
 
 - 接听和拨出电话
 - 接收和发送短信
-- 按联系人保存通话和短信历史。同一个人再次来电或发短信时，记录还在。
+- 按联系人保存一份记录。电话和短信按时间排在一起。同一个人再次来电或发短信时，记录还在。
 
-Agent 继续使用自己的记忆和工具。AgentCall 只负责这条电话通道。
+Agent 继续使用自己的记忆和工具。AgentCall 只负责这条电话通道。电话一接通就进入对话。对方每说完一句，本机直接问 Agent，再把回答念出来。公网地址只给 Twilio 回调用。
 
 ## 要求
 

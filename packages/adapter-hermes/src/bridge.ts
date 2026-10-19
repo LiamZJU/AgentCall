@@ -1,7 +1,7 @@
 import { AgentPhoneClient } from "@agentphone/sdk";
 import type { ServerEvent } from "@agentphone/protocol";
 import { HermesClient } from "./hermes.js";
-import { livePrompt, parseSummary, summaryPrompt, type PhoneBrief } from "./prompt.js";
+import { livePrompt, type PhoneBrief } from "./prompt.js";
 
 type CallContext = {
   callId: string;
@@ -104,25 +104,7 @@ export async function startHermesBridge(options: HermesBridgeOptions): Promise<{
   });
 
   phone.on("call.ended", (event) => {
-    const call = calls.get(event.callId ?? "");
     calls.delete(event.callId ?? "");
-    if (!call?.sessionId) return;
-    const sessionId = call.sessionId;
-    const threadId = call.threadId;
-    enqueue(async () => {
-      const text = await hermes.turn(sessionId, summaryPrompt(), {
-        onDelta: () => undefined,
-        onTool: () => undefined,
-        onComplete: () => undefined,
-      });
-      const summary = parseSummary(text);
-      if (!summary) {
-        console.error("[agentphone-hermes] summary was not JSON");
-        return;
-      }
-      phone.patchThread(threadId, summary);
-      console.error(`[agentphone-hermes] thread ${threadId} updated`);
-    });
   });
 
   phone.on("sms.received", (event) => {

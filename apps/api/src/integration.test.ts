@@ -62,11 +62,6 @@ test("inbound call resumes the same thread and speaks back", async () => {
     return text.includes("ninety dollars");
   });
 
-  events.send({
-    type: "thread.patch",
-    threadId: inbound.thread.id,
-    payload: { summary: "Asked about 50 units.", currentGoal: "Get the quote confirmed." },
-  });
   events.send({ type: "call.hangup", callId: inbound.call.id, payload: { reason: "done" } });
   await events.wait((event) => event.type === "call.ended");
 
@@ -78,11 +73,13 @@ test("inbound call resumes the same thread and speaks back", async () => {
   const resumed = await events.wait(
     (event) => event.type === "call.started" && event.callId === again.call.id,
   );
-  assert.equal(resumed.payload.thread.summary, "Asked about 50 units.");
+  const turns = resumed.payload.thread.turns as Array<{ text: string }>;
+  assert.ok(turns.some((turn) => turn.text.includes("fifty units")));
+  assert.ok(turns.some((turn) => turn.text.includes("ninety dollars")));
   events.close();
 });
 
-test("offline inbound requests a callback", async () => {
+test("an inbound call connects before any agent socket", async () => {
   const created = await api("/v1/agents", {
     method: "POST",
     body: JSON.stringify({ name: "Away", adapter: "generic" }),
@@ -95,9 +92,33 @@ test("offline inbound requests a callback", async () => {
     method: "POST",
     body: JSON.stringify({ to: "+14155550199", from: "+14155550123" }),
   });
-  assert.equal(inbound.connected, false);
-  assert.equal(inbound.call.status, "no_answer");
-  assert.equal(inbound.thread.callbackStatus, "requested");
+  assert.equal(inbound.connected, true);
+  assert.equal(inbound.call.status, "in_progress");
+});
+
+test("a local command speaks the reply without a gateway socket", async () => {
+  const created = await api("/v1/agents", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "Command",
+      adapter: "generic",
+      adapterConfig: { command: "node -e \"process.stdout.write('heard you')\"" },
+    }),
+  });
+  await api("/v1/numbers/local", {
+    method: "POST",
+    body: JSON.stringify({ agentId: created.agent.id, e164: "+14155550177" }),
+  });
+  const inbound = await api("/v1/dev/inbound", {
+    method: "POST",
+    body: JSON.stringify({ to: "+14155550177", from: "+14155550123" }),
+  });
+  await api("/v1/dev/prompt", {
+    method: "POST",
+    body: JSON.stringify({ callId: inbound.call.id, text: "Is anyone there?" }),
+  });
+  const spoken = await waitForSegment(inbound.call.id as string, "heard you");
+  assert.equal(spoken, "heard you");
 });
 
 test("a scheduled callback places another call on the same thread", async () => {
@@ -302,6 +323,19 @@ async function connect(token: string, agentId: string) {
       ws.close();
     },
   };
+}
+
+async function waitForSegment(callId: string, text: string) {
+  const start = Date.now();
+  while (Date.now() - start < 4000) {
+    const body = await api(`/v1/calls/${callId}`);
+    const match = (body.segments as Array<{ speaker: string; text: string }>).find(
+      (segment) => segment.speaker === "agent" && segment.text.includes(text),
+    );
+    if (match) return match.text;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  }
+  throw new Error(`agent did not say ${text}`);
 }
 
 async function waitFor(check: () => Promise<boolean>) {

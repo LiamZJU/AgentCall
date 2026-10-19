@@ -125,6 +125,20 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread_id, created_at);
 
+CREATE TABLE IF NOT EXISTS turns (
+  id TEXT PRIMARY KEY,
+  thread_id TEXT NOT NULL,
+  call_id TEXT,
+  channel TEXT NOT NULL,
+  who TEXT NOT NULL,
+  text TEXT NOT NULL,
+  interrupted INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS turns_thread ON turns(thread_id, created_at);
+CREATE INDEX IF NOT EXISTS turns_call ON turns(call_id, created_at);
+
 CREATE TABLE IF NOT EXISTS connect_sessions (
   code TEXT PRIMARY KEY,
   status TEXT NOT NULL,

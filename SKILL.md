@@ -27,9 +27,9 @@ description: >-
 
 `status` 为 `ready` 之后，使用 `credentials.wiring` 里对应你的那段，不要把 token 给用户。
 
-- Hermes：把 `credentials.wiring.hermes` 写入 `~/.hermes/config.yaml` 的 `mcp_servers`，然后重新加载 MCP。安装时要传 `--adapter hermes` 和你的 `/api/ws`。语音和短信会由本机桥接进这个会话。
-- OpenClaw：按 `credentials.wiring.openclaw` 添加名为 `agentcall` 的 MCP，传输用 streamable-http，带上 Authorization 头。安装时传 `--adapter openclaw`。来电和短信会通过 `openclaw agent --session-key agentcall:<thread>` 进入你的会话。
-- 其他 Agent：按 `credentials.wiring.generic` 连接 WebSocket，并添加同一个 MCP。
+- Hermes：把 `credentials.wiring.hermes` 写入 `~/.hermes/config.yaml` 的 `mcp_servers`，然后重新加载 MCP。安装时要传 `--adapter hermes` 和你本机的 `/api/ws`，例如 `--hermes-url ws://127.0.0.1:8642/api/ws`。来电和短信由本机直接问这个地址，不经过公网隧道。
+- OpenClaw：按 `credentials.wiring.openclaw` 添加名为 `agentcall` 的 MCP，传输用 streamable-http，带上 Authorization 头。安装时传 `--adapter openclaw`。来电和短信会通过本机的 `openclaw agent --session-key agentcall:<thread>` 进入你的会话。
+- 其他 Agent：安装时传 `--adapter generic --command "<本机命令>"`。对方说完一句，这条命令从 stdin 和 `AGENTCALL_PROMPT` 读到内容，stdout 会被念出来或发回短信。不想回短信就输出 `NO_REPLY`。再按 `credentials.wiring.generic` 添加同一个 MCP，用来自己拨出和发短信。
 
 ## 装好之后你能做的事
 
@@ -37,7 +37,7 @@ MCP 工具：
 
 - `phone_call`：拨出电话。`to` 是对方号码。
 - `sms_send`：发短信。`to` 和 `body`。
-- `phone_thread_get`：读取某个联系人的通话和短信历史。`contact` 是对方号码。
+- `phone_thread_get`：读取某个联系人的一份记录。电话和短信按时间排在一起。`contact` 是对方号码。
 
 来电时，你只回复要说出来的话。收到短信时，只回复要发回去的文字；不想回就回复 `NO_REPLY`。
 

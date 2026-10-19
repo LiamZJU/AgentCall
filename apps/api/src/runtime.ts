@@ -1,6 +1,7 @@
 import { normalizeE164, serverEvent, type Policy, type ServerEvent } from "@agentphone/protocol";
 import type { AppConfig } from "./config.js";
 import { HttpError } from "./errors.js";
+import { askAgent, interruptAgent, type AgentLink } from "./ask-agent.js";
 import { log } from "./log.js";
 import type { CallView, Store, ThreadView } from "./store.js";
 import { completeTwilioCall, dial, sendTwilioSms, twilioConfigured } from "./twilio.js";
@@ -92,16 +93,31 @@ export function createRuntime(store: Store, config: AppConfig) {
   function brief(thread: ThreadView) {
     return {
       id: thread.id,
-      summary: thread.summary,
-      currentGoal: thread.currentGoal,
-      pendingState: thread.pendingState,
+      contactE164: thread.contactE164,
       callbackStatus: thread.callbackStatus,
       callbackAt: thread.callbackAt,
       callbackNote: thread.callbackNote,
       externalSessionId: thread.externalSessionId,
-      contactE164: thread.contactE164,
-      recent: store.recentSegments(thread.id),
+      turns: store.listTurns(thread.id, 16),
     };
+  }
+
+  function historyPrompt(agentId: string, threadId: string, kind: "call" | "sms", spoken: string): string {
+    const fresh =
+      kind === "call"
+        ? `Phone call. They just said: ${spoken}\nReply with only the next words to say out loud. One or two short sentences.`
+        : `Text message. They just said: ${spoken}\nReply with only the text to send back. If you should not reply, reply with exactly NO_REPLY.`;
+    const link = linkFor(agentId);
+    if (link.adapter === "hermes" || link.adapter === "openclaw") return fresh;
+    const lines = store
+      .listTurns(threadId, 16)
+      .map((turn) => `${turn.channel} ${turn.who}: ${turn.text}`)
+      .join("\n");
+    const instruction =
+      kind === "call"
+        ? "You are on a live phone call. Reply with only the next words to say out loud. One or two short sentences."
+        : "You received a text message. Reply with only the text to send back. If you should not reply, reply with exactly NO_REPLY.";
+    return [instruction, lines ? `Conversation:\n${lines}` : ""].filter(Boolean).join("\n\n");
   }
 
   function emitStarted(live: LiveCall, resumed: boolean): void {
@@ -389,6 +405,55 @@ export function createRuntime(store: Store, config: AppConfig) {
       ),
     );
     log(`utterance ${callId}`, { text: spoken });
+    if ((sockets.get(live.agentId)?.size ?? 0) > 0) return;
+    void speakFromAgent(live, spoken);
+  }
+
+  async function speakFromAgent(live: LiveCall, spoken: string): Promise<void> {
+    const thread = store.getThread(live.threadId);
+    const prompt = historyPrompt(live.agentId, live.threadId, "call", spoken);
+    try {
+      let streamed = false;
+      const result = await askAgent({
+        link: linkFor(live.agentId),
+        threadId: live.threadId,
+        sessionId: thread.externalSessionId,
+        prompt,
+        onDelta: (token) => {
+          if (!token || live.ended) return;
+          streamed = true;
+          forwardSay(live, { token, last: false });
+        },
+      });
+      if (result.sessionId && result.sessionId !== thread.externalSessionId) {
+        store.updateThread(live.threadId, { externalSessionId: result.sessionId });
+      }
+      if (!live.ended && (streamed || result.text.trim())) {
+        forwardSay(live, { token: streamed ? "" : result.text, last: true });
+      }
+      log(`spoke ${live.callId}`, { chars: result.text.length });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown";
+      log(`ask agent failed ${live.callId}`, { error: message });
+      if (!live.ended) {
+        forwardSay(live, {
+          token: "I can't reach the assistant right now. Please try again in a moment.",
+          last: true,
+        });
+      }
+    }
+  }
+
+  function linkFor(agentId: string): AgentLink {
+    const agent = store.getAgent(agentId);
+    const secret = store.agentSecrets(agentId);
+    const config = agent.adapterConfig;
+    return {
+      adapter: agent.adapter,
+      hermesWsUrl: typeof config.hermesWsUrl === "string" ? config.hermesWsUrl : "",
+      hermesToken: secret.hermesToken,
+      command: typeof config.command === "string" ? config.command : "",
+    };
   }
 
   function receiveSms(input: { from: string; to: string; body: string; messageSid?: string }) {
@@ -417,7 +482,31 @@ export function createRuntime(store: Store, config: AppConfig) {
       ),
     );
     log(`sms received ${message.id}`, { from: input.from, threadId: thread.id });
+    if ((sockets.get(number.agentId)?.size ?? 0) === 0) {
+      void replyToSms(number.agentId, thread.id, text);
+    }
     return { message, thread };
+  }
+
+  async function replyToSms(agentId: string, threadId: string, inbound: string): Promise<void> {
+    const prompt = historyPrompt(agentId, threadId, "sms", inbound);
+    try {
+      const thread = store.getThread(threadId);
+      const result = await askAgent({
+        link: linkFor(agentId),
+        threadId,
+        sessionId: thread.externalSessionId,
+        prompt,
+      });
+      if (result.sessionId && result.sessionId !== thread.externalSessionId) {
+        store.updateThread(threadId, { externalSessionId: result.sessionId });
+      }
+      const body = result.text.trim();
+      if (!body || body === "NO_REPLY") return;
+      await sendSms(agentId, thread.contactE164, body);
+    } catch (error) {
+      log(`sms reply failed ${threadId}`, { error: error instanceof Error ? error.message : "unknown" });
+    }
   }
 
   async function sendSms(agentId: string, toRaw: string, body: string) {
@@ -595,6 +684,11 @@ export function createRuntime(store: Store, config: AppConfig) {
             });
             live.partial = "";
           }
+          const thread = store.getThread(live.threadId);
+          const link = linkFor(live.agentId);
+          if (link.hermesWsUrl && thread.externalSessionId) {
+            interruptAgent(link.hermesWsUrl, thread.externalSessionId);
+          }
           push(
             live.agentId,
             serverEvent(
@@ -643,18 +737,6 @@ export function createRuntime(store: Store, config: AppConfig) {
       const contact = store.upsertContact(number.agentId, input.from);
       const thread = store.upsertThread(number.agentId, contact.id);
       const simulated = input.simulated ?? false;
-      if (!isOnline(number.agentId)) {
-        return miss(
-          number.agentId,
-          thread,
-          input.from,
-          input.to,
-          "no_answer",
-          "agent_offline",
-          "We're not available right now. We'll call you back.",
-          simulated,
-        );
-      }
       if (liveByAgent.has(number.agentId)) {
         return miss(
           number.agentId,
@@ -676,7 +758,7 @@ export function createRuntime(store: Store, config: AppConfig) {
         fromE164: input.from,
         toE164: input.to,
         status: simulated ? "in_progress" : "ringing",
-        objective: thread.currentGoal || policy.objective,
+        objective: policy.objective,
         policy,
         simulated,
       });
@@ -699,24 +781,21 @@ export function createRuntime(store: Store, config: AppConfig) {
       policyId?: string;
     }) {
       const agent = store.getAgent(input.agentId);
-      if (!isOnline(agent.id)) throw new HttpError(409, "agent offline");
       if (liveByAgent.has(agent.id)) throw new HttpError(409, "agent is already on a call");
       const number = store.numberForAgent(agent.id);
       if (!number) throw new HttpError(409, "agent has no phone number");
       const contact = store.upsertContact(agent.id, input.to);
       const thread = store.upsertThread(agent.id, contact.id);
-      if (input.objective) store.updateThread(thread.id, { currentGoal: input.objective });
-      const freshThread = store.getThread(thread.id);
       const policy = store.resolvePolicy(agent.id, input.policyId);
       const simulated = !twilioConfigured(config);
       const call = store.createCall({
-        threadId: freshThread.id,
+        threadId: thread.id,
         agentId: agent.id,
         direction: "outbound",
         fromE164: number.e164,
         toE164: input.to,
         status: simulated ? "in_progress" : "queued",
-        objective: input.objective || freshThread.currentGoal || policy.objective,
+        objective: input.objective || policy.objective,
         policy,
         simulated,
       });
@@ -728,12 +807,12 @@ export function createRuntime(store: Store, config: AppConfig) {
           serverEvent(
             "call.dialing",
             { direction: "outbound", from: number.e164, to: input.to, objective: call.objective, simulated: true },
-            { callId: call.id, threadId: freshThread.id },
+            { callId: call.id, threadId: thread.id },
           ),
         );
         emitStarted(live, false);
         log(`simulated outbound ${call.id}`);
-        return { call: store.getCall(call.id), thread: freshThread, simulated: true };
+        return { call: store.getCall(call.id), thread: thread, simulated: true };
       }
       try {
         const sid = await dial(config, { callId: call.id, from: number.e164, to: input.to });
@@ -744,11 +823,11 @@ export function createRuntime(store: Store, config: AppConfig) {
           serverEvent(
             "call.dialing",
             { direction: "outbound", from: number.e164, to: input.to, objective: call.objective, simulated: false },
-            { callId: call.id, threadId: freshThread.id },
+            { callId: call.id, threadId: thread.id },
           ),
         );
         log(`outbound dialing ${call.id}`, { sid });
-        return { call: store.getCall(call.id), thread: freshThread, simulated: false };
+        return { call: store.getCall(call.id), thread: thread, simulated: false };
       } catch (error) {
         endCall(call.id, "dial_failed", "failed");
         throw new HttpError(502, error instanceof Error ? error.message : "dial failed");
@@ -794,7 +873,7 @@ export function createRuntime(store: Store, config: AppConfig) {
     async tickCallbacks() {
       const due = store.dueCallbacks(new Date().toISOString());
       for (const thread of due) {
-        if (!isOnline(thread.agentId) || liveByAgent.has(thread.agentId)) {
+        if (liveByAgent.has(thread.agentId)) {
           log(`callback waiting ${thread.id}`, { agentId: thread.agentId });
           continue;
         }
@@ -802,7 +881,7 @@ export function createRuntime(store: Store, config: AppConfig) {
           await this.startOutbound({
             agentId: thread.agentId,
             to: thread.contactE164,
-            objective: thread.currentGoal || thread.callbackNote || "Callback",
+            objective: thread.callbackNote || "Callback",
           });
           store.updateThread(thread.id, { callbackStatus: "completed" });
           log(`callback placed ${thread.id}`);

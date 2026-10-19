@@ -65,6 +65,17 @@ export const calls = sqliteTable("calls", {
   endReason: text("end_reason"),
 });
 
+export const turns = sqliteTable("turns", {
+  id: text("id").primaryKey(),
+  threadId: text("thread_id").notNull(),
+  callId: text("call_id"),
+  channel: text("channel").notNull(),
+  who: text("who").notNull(),
+  text: text("text").notNull(),
+  interrupted: integer("interrupted").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
 export const transcriptSegments = sqliteTable("transcript_segments", {
   id: text("id").primaryKey(),
   callId: text("call_id").notNull(),

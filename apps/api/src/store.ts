@@ -324,6 +324,13 @@ export function createStore(databasePath: string) {
       return toAgent(requireAgent(id));
     },
 
+    agentSecrets(id: string) {
+      const config = parseObject(requireAgent(id).adapterConfig);
+      return {
+        hermesToken: typeof config.hermesToken === "string" ? config.hermesToken : "",
+      };
+    },
+
     authenticate(agentId: string, token: string) {
       const row = db.select().from(schema.agents).where(eq(schema.agents.id, agentId)).get();
       if (!row || !tokenMatches(row.tokenHash, token)) return null;
@@ -653,6 +660,56 @@ export function createStore(databasePath: string) {
         .map(toCall);
     },
 
+    addTurn(input: {
+      threadId: string;
+      callId?: string | null;
+      channel: "call" | "sms";
+      who: "contact" | "agent" | "system";
+      text: string;
+      interrupted?: boolean;
+    }) {
+      const row = {
+        id: createId("trn"),
+        threadId: input.threadId,
+        callId: input.callId ?? null,
+        channel: input.channel,
+        who: input.who,
+        text: input.text,
+        interrupted: input.interrupted ? 1 : 0,
+        createdAt: stamp(),
+      };
+      db.insert(schema.turns).values(row).run();
+      this.touchThread(input.threadId, row.createdAt);
+      return {
+        id: row.id,
+        threadId: row.threadId,
+        callId: row.callId,
+        channel: row.channel as "call" | "sms",
+        who: row.who as "contact" | "agent" | "system",
+        text: row.text,
+        createdAt: row.createdAt,
+      };
+    },
+
+    listTurns(threadId: string, limit = 50) {
+      const rows = db
+        .select()
+        .from(schema.turns)
+        .where(eq(schema.turns.threadId, threadId))
+        .orderBy(desc(schema.turns.createdAt))
+        .limit(limit)
+        .all();
+      return rows.reverse().map((row) => ({
+        id: row.id,
+        threadId: row.threadId,
+        callId: row.callId,
+        channel: row.channel as "call" | "sms",
+        who: row.who as "contact" | "agent" | "system",
+        text: row.text,
+        createdAt: row.createdAt,
+      }));
+    },
+
     addSegment(input: {
       callId: string;
       threadId: string;
@@ -661,48 +718,51 @@ export function createStore(databasePath: string) {
       lang?: string | null;
       interrupted?: boolean;
     }) {
-      const last = db
-        .select()
-        .from(schema.transcriptSegments)
-        .where(eq(schema.transcriptSegments.callId, input.callId))
-        .orderBy(desc(schema.transcriptSegments.seq))
-        .limit(1)
-        .get();
-      const row = {
-        id: createId("seg"),
+      const turn = this.addTurn({
+        threadId: input.threadId,
+        callId: input.callId,
+        channel: "call",
+        who: input.speaker,
+        text: input.text,
+        interrupted: input.interrupted,
+      });
+      return {
+        id: turn.id,
         callId: input.callId,
         threadId: input.threadId,
-        seq: (last?.seq ?? 0) + 1,
+        seq: this.listSegments(input.callId).length,
         speaker: input.speaker,
         text: input.text,
         lang: input.lang ?? null,
-        interrupted: input.interrupted ? 1 : 0,
-        createdAt: stamp(),
+        interrupted: Boolean(input.interrupted),
+        createdAt: turn.createdAt,
       };
-      db.insert(schema.transcriptSegments).values(row).run();
-      return toSegment(row);
     },
 
     listSegments(callId: string) {
       return db
         .select()
-        .from(schema.transcriptSegments)
-        .where(eq(schema.transcriptSegments.callId, callId))
-        .orderBy(schema.transcriptSegments.seq)
+        .from(schema.turns)
+        .where(and(eq(schema.turns.callId, callId), eq(schema.turns.channel, "call")))
+        .orderBy(schema.turns.createdAt)
         .all()
-        .map(toSegment);
+        .map((row, index) => ({
+          id: row.id,
+          callId: row.callId ?? callId,
+          threadId: row.threadId,
+          seq: index + 1,
+          speaker: row.who,
+          text: row.text,
+          lang: null as string | null,
+          interrupted: row.interrupted === 1,
+          createdAt: row.createdAt,
+        }));
     },
 
     recentSegments(threadId: string, limit = 20) {
-      const rows = db
-        .select()
-        .from(schema.transcriptSegments)
-        .where(eq(schema.transcriptSegments.threadId, threadId))
-        .orderBy(desc(schema.transcriptSegments.createdAt))
-        .limit(limit)
-        .all()
-        .map(toSegment);
-      return rows.reverse();
+      return this.listTurns(threadId, limit)
+        .filter((turn) => turn.channel === "call")
+        .map((turn) => ({ speaker: turn.who, text: turn.text }));
     },
 
     addMessage(input: {
@@ -715,8 +775,14 @@ export function createStore(databasePath: string) {
       twilioSid?: string | null;
       status: string;
     }) {
-      const row = {
-        id: createId("msg"),
+      const turn = this.addTurn({
+        threadId: input.threadId,
+        channel: "sms",
+        who: input.direction === "outbound" ? "agent" : "contact",
+        text: input.body,
+      });
+      return {
+        id: turn.id,
         threadId: input.threadId,
         agentId: input.agentId,
         direction: input.direction,
@@ -725,20 +791,22 @@ export function createStore(databasePath: string) {
         body: input.body,
         twilioSid: input.twilioSid ?? null,
         status: input.status,
-        createdAt: stamp(),
+        createdAt: turn.createdAt,
       };
-      db.insert(schema.messages).values(row).run();
-      this.touchThread(input.threadId, row.createdAt);
-      return row;
     },
 
     listMessages(threadId: string) {
-      return db
-        .select()
-        .from(schema.messages)
-        .where(eq(schema.messages.threadId, threadId))
-        .orderBy(schema.messages.createdAt)
-        .all();
+      return this.listTurns(threadId, 200)
+        .filter((turn) => turn.channel === "sms")
+        .map((turn) => ({
+          id: turn.id,
+          threadId: turn.threadId,
+          direction: turn.who === "agent" ? "outbound" : "inbound",
+          fromE164: "",
+          body: turn.text,
+          status: turn.who === "agent" ? "sent" : "received",
+          createdAt: turn.createdAt,
+        }));
     },
 
     createPolicy(input: {
