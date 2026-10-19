@@ -20,11 +20,20 @@ Reply in Chinese
 - AgentPhone: Hermes stays the reasoner. Drive it through TUI gateway `/api/ws` (`prompt.submit`, `message.delta`, `tool.start`). One phone thread maps to one Hermes session.
 - AgentPhone: hard policy gates apply to `action.propose` only. Do not pretend to sandbox the agent's own calendar, email, or browser tools.
 - This machine's pnpm skips native builds. Use Node's built-in `node:sqlite` behind Drizzle's better-sqlite3 session, and implement `statement.raw()` as column-ordered arrays. Do not depend on a compiled better-sqlite3 binary.
-- Vite on this Windows host answers on `http://localhost:5173`, not `http://127.0.0.1:5173`. The API still binds `127.0.0.1:8787`.
+- Vite on this host answers on `http://localhost:5173`, not `http://127.0.0.1:5173`. The API still binds `127.0.0.1:8787`.
+- pnpm 11 `allowBuilds` must be real booleans. The placeholder text `set this to true or false` makes `pnpm install` exit 1 and skips esbuild, so tsx and Vite cannot start. Set `esbuild: true`. Keep `better-sqlite3: false` and use `node:sqlite`.
 
 # Scratchpad
 
 ## Current task
+
+Checked that AgentCall installs and runs after `allowBuilds` is set.
+
+[X] pnpm install (esbuild allowed, better-sqlite3 skipped)
+[X] Build workspace packages
+[X] Start API on 8787 and console on localhost:5173
+[X] Hit /health and the console
+[X] Run tests (20 passed)
 
 One history per contact. Calls and SMS are rows in `turns`. Hermes and OpenClaw receive only the new line and keep their own session. A local command receives the recent rows.
 
